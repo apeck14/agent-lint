@@ -5,8 +5,8 @@ import { dirname, join, parse } from 'node:path'
 
 import type { RunResult } from './cli-types.js'
 
-export async function runProcess(command: string, args: string[], cwd: string): Promise<RunResult> {
-  return await new Promise((resolve) => {
+export function runProcess(command: string, args: string[], cwd: string): Promise<RunResult> {
+  return new Promise((resolve) => {
     const isWindowsCommand = process.platform === 'win32' && /^(?:bun|bunx|npm|npx|pnpm|yarn)$/.test(command)
     const executable = isWindowsCommand ? (process.env.ComSpec ?? 'cmd.exe') : command
     const processArgs = isWindowsCommand ? ['/d', '/s', '/c', `${command}.cmd`, ...args] : args
@@ -26,11 +26,10 @@ export async function runProcess(command: string, args: string[], cwd: string): 
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
     child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
     child.on('error', (error) => {
-      resolve({ command: [command, ...args].join(' '), error, exitCode: 2, stderr: '', stdout: '' })
+      resolve({ error, exitCode: 2, stderr: '', stdout: '' })
     })
     child.on('close', (code) => {
       resolve({
-        command: [command, ...args].join(' '),
         exitCode: code ?? 2,
         stderr: Buffer.concat(stderr).toString('utf8'),
         stdout: Buffer.concat(stdout).toString('utf8')
@@ -39,8 +38,7 @@ export async function runProcess(command: string, args: string[], cwd: string): 
   })
 }
 
-export function resolvePackageBin(packageName: string, relativeBin: string, cwd: string): string {
-  const fromProject = createRequire(join(cwd, 'package.json'))
+export function resolvePackageBin(packageName: string, relativeBin: string): string {
   const fromPackage = createRequire(import.meta.url)
 
   function packageRoot(require: NodeJS.Require): string {
@@ -65,11 +63,7 @@ export function resolvePackageBin(packageName: string, relativeBin: string, cwd:
     }
   }
 
-  try {
-    return join(packageRoot(fromProject), relativeBin)
-  } catch {
-    return join(packageRoot(fromPackage), relativeBin)
-  }
+  return join(packageRoot(fromPackage), relativeBin)
 }
 
 export function runNodePackageBin(
@@ -78,5 +72,5 @@ export function runNodePackageBin(
   args: string[],
   cwd: string
 ): Promise<RunResult> {
-  return runProcess(process.execPath, [resolvePackageBin(packageName, relativeBin, cwd), ...args], cwd)
+  return runProcess(process.execPath, [resolvePackageBin(packageName, relativeBin), ...args], cwd)
 }

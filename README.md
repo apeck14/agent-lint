@@ -1,142 +1,149 @@
-# @apehk/agent-lint
+# @apeck14/agent-lint
 
-Opinionated, agent-first checks for JavaScript and TypeScript repositories. It combines Oxlint, Oxfmt, and on-demand
-Knip analysis behind one deterministic CLI and two typed configuration factories.
+Opinionated, agent-first checks for JavaScript and TypeScript repositories. One small package combines Oxlint, Oxfmt,
+and on-demand Knip analysis with deterministic output and safe defaults.
 
-The defaults are intentionally broad and the public surface is intentionally small: most repositories should initialize
-the package once and never need to tune it.
+It is optimized for TypeScript-heavy services, workers, React, and Next.js, while remaining useful for ordinary
+JavaScript, CommonJS, browser, and monorepo projects.
 
-## Requirements
+## Why it works well for agentic coding
 
-- Node.js 22.18 or newer
-- npm, pnpm, Yarn, or Bun
+- **Fast feedback:** native linting and formatting run concurrently, keeping edit-check loops short.
+- **Low-token diagnostics:** stable one-line findings are sorted and capped at 50 by default, with no code frames or
+  decoration.
+- **Agent-focused guardrails:** catches unsafe assertions, unexplained suppressions, unhandled promises, unresolved or
+  cyclic imports, stale disables, broken React patterns, and focused or disabled tests.
+- **Deterministic output:** one formatter covers code, JSON, CSS, Markdown, YAML, HTML, and related files; imports,
+  package metadata, and Tailwind classes are sorted consistently.
+- **Safe automation:** `fix` applies only safe Oxlint fixes before formatting. Dangerous fixes, destructive Knip modes,
+  hooks, and install-time scripts are not exposed.
+- **No constant analysis tax:** typechecking is opt-in at the CLI and added automatically to suitable generated project
+  scripts; structural dead-code analysis runs only when useful.
+- **Minimal agent context:** initialization writes a short operational block instead of a large policy document.
 
-## Set up a repository
+## Quick start
 
-Install the package exactly, then run the non-interactive initializer:
-
-```sh
-pnpm add --save-dev --save-exact @apehk/agent-lint@1.0.0
-pnpm exec agent-lint init
-```
-
-The initializer detects the package manager, runtime, React or Next.js, and Jest or Vitest. It creates typed Oxlint and
-Oxfmt configuration, adds conventional scripts, and appends a short managed block to `AGENTS.md`. Existing custom files
-and scripts are preserved. Preview every proposed change with:
-
-```sh
-pnpm exec agent-lint init --dry-run
-```
-
-When invoked through a one-off package runner, `init` installs this package as an exact development dependency.
-
-## Everyday commands
+Requires Node.js 22.18 or newer. npm, pnpm, Yarn, and Bun repositories are supported.
 
 ```sh
-agent-lint check                       # lint and format concurrently
-agent-lint check --changed             # staged, unstaged, renamed, and untracked files
-agent-lint check --since origin/main   # branch changes plus current working-tree changes
-agent-lint check --typecheck           # also run the repository's local TypeScript check
-agent-lint fix --changed               # safe Oxlint fixes, then deterministic formatting
-agent-lint lint [paths] [--fix]
-agent-lint format [paths] [--check | --write]
-agent-lint deadcode [--production]
-agent-lint doctor
+npx --yes @apeck14/agent-lint@1.0.0 init
 ```
 
-Paths cannot be combined with `--changed` or `--since`. Formatting defaults to check mode. Dead-code analysis is always
-read-only and never exposes Knip's destructive fix mode.
+The non-interactive initializer detects the package manager, runtime, TypeScript, framework, and test runner. It installs
+an exact development dependency, creates typed Oxlint and Oxfmt configuration, adds package scripts, updates a managed
+`AGENTS.md` block, adds LF normalization when `.gitattributes` is absent, and creates a one-line `CLAUDE.md` import when
+absent. Existing custom files, script collisions, and competing tools are preserved and reported.
 
-Exit status is `0` when clean, `1` for findings, and `2` for configuration or execution failures.
+Preview the exact changes without writing:
 
-## Output designed for agents
+```sh
+npx --yes @apeck14/agent-lint@1.0.0 init --dry-run
+```
 
-Agent output is the default and contains one sortable line per finding:
+## Agent workflow
+
+The generated instructions use the detected package manager. With pnpm, the normal loop is:
+
+```sh
+pnpm fix --changed
+pnpm check
+pnpm deadcode # after adding, moving, or removing modules or dependencies
+```
+
+`--changed` includes the entire working tree. If unrelated work is present, pass only the files the agent edited. The
+generated instructions also tell agents to fix causes instead of weakening rules or adding ignores.
+
+## Commands
+
+Invoke the CLI through the package manager for options not covered by generated scripts:
+
+- `check [paths] [--changed | --since <ref>] [--typecheck]`: lint and format concurrently, optionally with typechecking.
+- `fix [paths] [--changed | --since <ref>]`: apply safe lint fixes, then format.
+- `lint [paths] [--fix]`: run Oxlint only.
+- `format [paths] [--check | --write]`: run Oxfmt; check is the default.
+- `deadcode [--production]`: report unused files, exports, and dependencies without modifying files.
+- `init [--dry-run]`: configure a repository safely and idempotently.
+- `doctor`: check installation, configuration, scripts, CI, agent context, and secret-shaped tracked files.
+
+Example: `pnpm exec agent-lint check --since origin/main`.
+
+Paths cannot be combined with `--changed` or `--since`. Shared output options are `--format agent|human|json`,
+`--max-diagnostics <n>`, and `--no-diagnostic-limit`. Exit status is `0` when clean, `1` for findings, and `2` for
+configuration or execution failures.
+
+## Defaults
+
+- All enabled rules are errors; warnings cannot accumulate unnoticed.
+- `_`-prefixed variables and parameters are intentional.
+- Production TypeScript rejects explicit `any`, non-null assertions, and unexplained suppression comments. Tests,
+  fixtures, generated files, and tool configuration relax these restrictions.
+- React enables hooks, accessibility, render purity, immutability, ref safety, and render-state correctness. Next.js,
+  Jest, and Vitest add their native correctness checks.
+- Formatting uses 120 columns, two spaces, no semicolons, single quotes including JSX, no trailing commas, and LF.
+- Dependencies, framework/build output, package-manager and tool caches, deployment state, test reports, lockfiles,
+  snapshots, fixture data, minified files, and conventional generated source are ignored.
+- `check --typecheck` uses the repository's non-recursive `typecheck` script or its installed TypeScript compiler. No
+  bundled compiler is substituted.
+
+Agent output is one line per finding:
 
 ```text
 src/example.ts:4:7 [typescript/no-explicit-any] Unexpected any. Specify a different type.
 ```
 
-Only 50 diagnostics are printed by default. The truncation line includes the exact command to rerun without a limit.
-Use `--format human`, `--format json`, `--max-diagnostics <n>`, or `--no-diagnostic-limit` when needed. GitHub Actions
-annotations are automatic unless `--format` is explicitly provided. Clean agent output is one summary line.
+GitHub Actions annotations are automatic unless an output format is explicitly selected. Truncated output includes the
+exact unlimited rerun command.
 
 ## Typed configuration
 
+Most repositories should keep the generated configuration unchanged. Consumer values take precedence when an override
+is genuinely needed; ignores and file overrides are additive.
+
 ```ts
-// oxlint.config.ts
-import { createOxlintConfig } from '@apehk/agent-lint'
+import { createOxlintConfig } from '@apeck14/agent-lint'
 
 export default createOxlintConfig({
   environment: 'universal',
   framework: 'next',
   testRunner: 'jest',
   ignores: ['public/vendor/**'],
-  rules: { 'typescript/no-explicit-any': 'off' },
-  overrides: [{ files: ['scripts/**'], rules: { 'no-console': 'off' } }]
+  rules: {
+    'no-restricted-imports': [
+      'error',
+      {
+        paths: [{ name: 'legacy-client', message: 'Use the client in src/api/client.ts.' }]
+      }
+    ]
+  }
 })
 ```
 
 ```ts
-// oxfmt.config.ts
-import { createOxfmtConfig } from '@apehk/agent-lint'
+import { createOxfmtConfig } from '@apeck14/agent-lint'
 
 export default createOxfmtConfig({
   ignores: ['public/generated/**'],
   tailwind: { stylesheet: 'src/styles.css' },
-  overrides: [{ files: ['legacy/**'], printWidth: 100 }],
   format: { printWidth: 110 }
 })
 ```
 
-Consumer rules and formatter options win over package defaults. Ignores and file overrides are additive. Set
-`tailwind: false` to disable Tailwind sorting explicitly.
+Set `tailwind: false` to disable Tailwind sorting. Appended `overrides` are available from both factories.
+Use import restrictions for repository-specific boundaries or deprecated APIs; include the replacement in `message`
+so agents receive the repair guidance directly in diagnostics.
 
-## Defaults
+## Design rationale
 
-- Oxlint correctness rules are errors, never warnings.
-- Native Oxc, TypeScript, Unicorn, Import, and Promise rules are enabled.
-- Full-depth circular imports, export integrity, duplicate imports, self-imports, stale disables, debugger, eval, dynamic
-  functions, and non-strict equality are rejected.
-- `_`-prefixed variables and parameters are intentional.
-- Production TypeScript rejects explicit `any` and unexplained suppression comments; tests, fixtures, generated files,
-  and tool configuration relax those two policies.
-- React enables hooks and accessibility correctness. Next.js adds native Next checks. Jest and Vitest reject focused or
-  disabled tests and validate assertions, titles, and callbacks.
-- Formatting uses 120 columns, two spaces, no semicolons, single quotes including JSX, no trailing commas, and LF.
-- Imports and `package.json` are sorted deterministically while side-effect import order and script order are preserved.
-- Tailwind v3 configuration and v4 stylesheets are detected, including `cn`, `cva`, `clsx`, and `twMerge` helpers.
-
-Oxfmt covers JavaScript, TypeScript, JSON, JSONC, CSS, SCSS, Less, Markdown, YAML, HTML, Vue, Svelte, Astro, GraphQL, and
-other supported text formats without separate plugins.
-
-## Type checking and dead code
-
-`check --typecheck` runs an existing non-recursive `typecheck` script. Otherwise it runs the repository's installed
-TypeScript compiler with `--noEmit` against `tsconfig.json` or `jsconfig.json`. It never substitutes a bundled compiler.
-
-`deadcode` respects native Knip configuration and `.gitignore`, omits duplicate cycle reporting, and shares the same
-diagnostic cap as other commands.
-
-## Why this shape
-
-Oxc provides a native coding-agent output format and recommends tight lint/fix feedback loops. Empirical work on
-repository instructions suggests that oversized always-loaded instruction files can add reasoning cost without reliably
-improving outcomes, so initialization writes only operational commands. Knip stays on demand because structural analysis
-is valuable after dependency or module changes but unnecessary in every edit loop.
+Oxc provides native agent-oriented output and recommends tight lint/fix loops. Knip stays on demand because structural
+analysis is valuable after dependency or module changes but unnecessary after every edit. Research on repository
+instructions also suggests that oversized always-loaded guidance can increase reasoning cost without reliably improving
+results, so generated instructions contain only commands and high-value guardrails.
 
 - [Oxc coding-agent guidance](https://oxc.rs/docs/guide/usage/coding-agents.html)
-- [Oxfmt configuration](https://oxc.rs/docs/guide/usage/formatter/config)
-- [Oxfmt language support](https://oxc.rs/docs/guide/usage/formatter/language-support)
-- [Knip analysis model](https://knip.dev/explanations/how-knip-works)
 - [AGENTS.md evaluation](https://arxiv.org/abs/2602.11988)
 - [Configuration-smell study](https://arxiv.org/abs/2606.15828)
 
-## Security and side effects
-
-The package has no install, postinstall, prepare, or other consumer-mutating lifecycle scripts. `doctor` is offline and
-read-only. It reports operational setup problems separately from migration advice and warns about tracked environment or
-private-key-shaped files without reading their contents.
+`doctor` is offline and read-only. The package has no consumer-mutating lifecycle scripts.
 
 ## License
 

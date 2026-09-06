@@ -2,14 +2,26 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 
 import type { CommandResult, Finding } from './cli-types.js'
+import { COMPETING_CONFIG_NAMES, OXFMT_CONFIG_NAMES, OXLINT_CONFIG_NAMES } from './config-files.js'
+import { PACKAGE_NAME, PACKAGE_VERSION } from './package-metadata.js'
 import { resolvePackageBin, runProcess } from './process.js'
 import { detectPackageManager, isGitRepository, readPackageJson } from './project.js'
 
-const PACKAGE_NAME = '@apehk/agent-lint'
-const PACKAGE_VERSION = '1.0.0'
-const OXLINT_CONFIGS = ['.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts']
-const OXFMT_CONFIGS = ['.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.ts', 'oxfmt.config.mts']
-const WALK_IGNORES = new Set(['.git', '.next', '.turbo', 'build', 'coverage', 'dist', 'node_modules', 'out', 'vendor'])
+const WALK_IGNORES = new Set([
+  '.cache',
+  '.git',
+  '.next',
+  '.pnpm',
+  '.pnpm-store',
+  '.turbo',
+  '.yarn',
+  'build',
+  'coverage',
+  'dist',
+  'node_modules',
+  'out',
+  'vendor'
+])
 const EXPECTED_SCRIPTS: Record<string, RegExp> = {
   check: /agent-lint\s+check/,
   deadcode: /agent-lint\s+deadcode/,
@@ -38,8 +50,12 @@ function finding(
   }
 }
 
-function existing(cwd: string, names: string[]): string[] {
+function existing(cwd: string, names: readonly string[]): string[] {
   return names.filter((name) => existsSync(join(cwd, name)))
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function workflowFiles(cwd: string): string[] {
@@ -48,12 +64,16 @@ function workflowFiles(cwd: string): string[] {
   return readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
     .map((entry) => join(directory, entry.name))
+    .sort(compareText)
 }
 
 function walkFiles(cwd: string): string[] {
   const files: string[] = []
   const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+      compareText(left.name, right.name)
+    )
+    for (const entry of entries) {
       if (entry.isDirectory()) {
         if (!WALK_IGNORES.has(entry.name)) visit(join(directory, entry.name))
       } else if (entry.isFile()) {
@@ -65,20 +85,32 @@ function walkFiles(cwd: string): string[] {
   return files
 }
 
-function lineCount(path: string): number {
-  return readFileSync(path, 'utf8').split(/\r?\n/).length
+function lineCount(content: string): number {
+  if (!content) return 0
+  return content.split(/\r?\n/).length - (content.endsWith('\n') ? 1 : 0)
 }
 
-function effectiveInstructionLines(cwd: string, agentsPath: string): number {
+function hasRepositoryLfPolicy(cwd: string): boolean {
+  const path = join(cwd, '.gitattributes')
+  if (!existsSync(path)) return false
+  return /^\s*\*\s+text(?:=auto)?\s+eol=lf\s*$/m.test(readFileSync(path, 'utf8'))
+}
+
+function effectiveInstructionSize(cwd: string, agentsPath: string): { lines: number; tokens: number } {
   let directory = dirname(agentsPath)
-  let total = 0
+  let bytes = 0
+  let lines = 0
   while (directory.startsWith(cwd)) {
     const candidate = join(directory, 'AGENTS.md')
-    if (existsSync(candidate)) total += lineCount(candidate)
+    if (existsSync(candidate)) {
+      const content = readFileSync(candidate, 'utf8')
+      bytes += Buffer.byteLength(content, 'utf8')
+      lines += lineCount(content)
+    }
     if (directory === cwd) break
     directory = dirname(directory)
   }
-  return total
+  return { lines, tokens: Math.ceil(bytes / 4) }
 }
 
 function allDependencies(packageJson: ReturnType<typeof readPackageJson>): Record<string, string> {
@@ -126,7 +158,7 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
     notes.push(`package manager: ${manager}`)
   } catch (error) {
     return {
-      exitCode: 1,
+      exitCode: 2,
       findings: [finding(cwd, 'project', error instanceof Error ? error.message : String(error))]
     }
   }
@@ -135,8 +167,8 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
   if (managerVersion.exitCode !== 0) {
     findings.push(finding(cwd, 'package-manager', `${manager} is unavailable`))
   } else {
-    const declaredVersion = packageJson.packageManager?.split('@').slice(1).join('@')
-    if (declaredVersion && !managerVersion.stdout.trim().startsWith(declaredVersion)) {
+    const declaredVersion = packageJson.packageManager?.split('@').slice(1).join('@').split('+')[0]
+    if (declaredVersion && managerVersion.stdout.trim() !== declaredVersion) {
       notes.push(
         `advice: packageManager declares ${manager}@${declaredVersion}, current executable is ${managerVersion.stdout.trim()}`
       )
@@ -145,7 +177,7 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
 
   const dependencies = allDependencies(packageJson)
   const isPackageRepository = packageJson.name === PACKAGE_NAME && packageJson.version === PACKAGE_VERSION
-  if (!isPackageRepository && dependencies[PACKAGE_NAME] !== PACKAGE_VERSION) {
+  if (!isPackageRepository && packageJson.devDependencies?.[PACKAGE_NAME] !== PACKAGE_VERSION) {
     findings.push(finding(cwd, 'dependency', `Install ${PACKAGE_NAME}@${PACKAGE_VERSION} as an exact dev dependency`))
   }
 
@@ -155,7 +187,7 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
     ['knip', 'bin/knip.js']
   ] as const) {
     try {
-      resolvePackageBin(name, relativeBin, cwd)
+      resolvePackageBin(name, relativeBin)
     } catch (error) {
       findings.push(
         finding(cwd, 'binary', `${name} is unavailable: ${error instanceof Error ? error.message : String(error)}`)
@@ -164,10 +196,10 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
   }
 
   for (const [label, names] of [
-    ['Oxlint', OXLINT_CONFIGS],
-    ['Oxfmt', OXFMT_CONFIGS]
+    ['Oxlint', OXLINT_CONFIG_NAMES],
+    ['Oxfmt', OXFMT_CONFIG_NAMES]
   ] as const) {
-    const configs = existing(cwd, [...names])
+    const configs = existing(cwd, names)
     if (configs.length === 0) findings.push(finding(cwd, 'config-missing', `${label} configuration is missing`))
     if (configs.length > 1)
       findings.push(finding(cwd, 'config-duplicate', `Multiple ${label} configurations found: ${configs.join(', ')}`))
@@ -189,14 +221,17 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
     }
   }
 
-  const competing = Object.keys(dependencies).filter(
-    (name) =>
-      name === 'eslint' ||
-      name === 'prettier' ||
-      name.startsWith('@eslint/') ||
-      name.includes('eslint-') ||
-      name.includes('prettier-')
-  )
+  const competing = [
+    ...Object.keys(dependencies).filter(
+      (name) =>
+        name === 'eslint' ||
+        name === 'prettier' ||
+        name.startsWith('@eslint/') ||
+        name.includes('eslint-') ||
+        name.includes('prettier-')
+    ),
+    ...existing(cwd, COMPETING_CONFIG_NAMES)
+  ]
   if (competing.length > 0) notes.push(`advice: review competing tooling before removal: ${competing.join(', ')}`)
 
   const workflows = workflowFiles(cwd)
@@ -219,6 +254,12 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
     }
   }
 
+  if (!hasRepositoryLfPolicy(cwd)) {
+    notes.push(
+      'advice: .gitattributes does not enforce repository-wide LF endings; Windows checkouts may fail formatting'
+    )
+  }
+
   const repositoryFiles = walkFiles(cwd)
   const agentFiles = repositoryFiles.filter((path) => /(?:^|[\\/])AGENTS\.md$/.test(path))
   const agentsPath = join(cwd, 'AGENTS.md')
@@ -226,11 +267,11 @@ export async function runDoctor(cwd: string): Promise<CommandResult> {
     notes.push('advice: AGENTS.md is missing')
   }
   const largestEffective = agentFiles
-    .map((path) => ({ lines: effectiveInstructionLines(cwd, path), path }))
-    .sort((left, right) => right.lines - left.lines)[0]
-  if (largestEffective && largestEffective.lines > 200) {
+    .map((path) => ({ ...effectiveInstructionSize(cwd, path), path }))
+    .sort((left, right) => right.tokens - left.tokens || compareText(left.path, right.path))[0]
+  if (largestEffective && (largestEffective.lines >= 200 || largestEffective.tokens >= 1500)) {
     notes.push(
-      `advice: effective agent instructions reach ${largestEffective.lines} lines at ${relative(cwd, largestEffective.path).replaceAll('\\', '/')}`
+      `advice: effective agent instructions reach ${largestEffective.lines} lines and approximately ${largestEffective.tokens} tokens at ${relative(cwd, largestEffective.path).replaceAll('\\', '/')}`
     )
   }
 

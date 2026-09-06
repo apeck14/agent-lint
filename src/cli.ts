@@ -8,11 +8,11 @@ import { runDoctor } from './doctor.js'
 import { changedFiles } from './git-files.js'
 import { initialize } from './init.js'
 import { outputFormat, writeResult } from './output.js'
+import { PACKAGE_VERSION } from './package-metadata.js'
 import { runNodePackageBin } from './process.js'
 import { mergeResults, parseKnip, parseOxfmt, parseOxlint } from './tool-results.js'
 import { runTypecheck } from './typecheck.js'
 
-const VERSION = '1.0.0'
 const COMMANDS = new Set(['check', 'fix', 'lint', 'format', 'deadcode', 'init', 'doctor'])
 const SHARED_FLAGS = new Set(['format', 'max-diagnostics', 'no-diagnostic-limit', 'help'])
 const COMMAND_FLAGS: Record<string, Set<string>> = {
@@ -25,7 +25,7 @@ const COMMAND_FLAGS: Record<string, Set<string>> = {
   lint: new Set(['fix'])
 }
 
-const HELP = `agent-lint ${VERSION}
+const HELP = `agent-lint ${PACKAGE_VERSION}
 
 Usage:
   agent-lint check [paths] [--changed | --since <ref>] [--typecheck]
@@ -44,7 +44,6 @@ Output:
 
 interface CliOptions {
   changed: boolean
-  check: boolean
   command: string
   dryRun: boolean
   fix: boolean
@@ -61,7 +60,6 @@ function parseCli(argv: string[]): CliOptions {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
     return {
       changed: false,
-      check: false,
       command: 'help',
       dryRun: false,
       fix: false,
@@ -76,7 +74,6 @@ function parseCli(argv: string[]): CliOptions {
   if (argv[0] === '--version' || argv[0] === '-V') {
     return {
       changed: false,
-      check: false,
       command: 'version',
       dryRun: false,
       fix: false,
@@ -119,6 +116,9 @@ function parseCli(argv: string[]): CliOptions {
 
   const changed = parsed.values.changed ?? false
   const since = parsed.values.since
+  if (since !== undefined && since.trim() === '') throw new Error('--since requires a non-empty Git ref')
+  if (['deadcode', 'doctor', 'init'].includes(command) && parsed.positionals.length > 0)
+    throw new Error(`${command} does not accept paths`)
   if (changed && since) throw new Error('--changed and --since are mutually exclusive')
   if ((changed || since) && parsed.positionals.length > 0)
     throw new Error('Paths cannot be combined with --changed or --since')
@@ -131,7 +131,6 @@ function parseCli(argv: string[]): CliOptions {
 
   return {
     changed,
-    check: parsed.values.check ?? false,
     command,
     dryRun: parsed.values['dry-run'] ?? false,
     fix: parsed.values.fix ?? false,
@@ -160,13 +159,13 @@ async function selectedPaths(options: CliOptions, cwd: string): Promise<{ notes:
 
 async function lint(cwd: string, paths: string[], fix: boolean): Promise<CommandResult> {
   if (paths.length === 0) return { exitCode: 0, findings: [] }
-  const args = ['--format', 'json', '--no-error-on-unmatched-pattern', ...(fix ? ['--fix'] : []), ...paths]
+  const args = ['--format', 'json', '--no-error-on-unmatched-pattern', ...(fix ? ['--fix'] : []), '--', ...paths]
   return parseOxlint(await runNodePackageBin('oxlint', 'bin/oxlint', args, cwd), cwd)
 }
 
 async function format(cwd: string, paths: string[], write: boolean): Promise<CommandResult> {
   if (paths.length === 0) return { exitCode: 0, findings: [] }
-  const args = [write ? '--write' : '--list-different', '--no-error-on-unmatched-pattern', ...paths]
+  const args = [write ? '--write' : '--list-different', '--no-error-on-unmatched-pattern', '--', ...paths]
   return parseOxfmt(await runNodePackageBin('oxfmt', 'bin/oxfmt', args, cwd), cwd, write)
 }
 
@@ -198,15 +197,15 @@ async function execute(options: CliOptions, cwd: string): Promise<CommandResult>
   return { ...mergeResults(await Promise.all(operations)), notes: selected.notes }
 }
 
-function errorResult(cwd: string, message: string): CommandResult {
+function errorResult(cwd: string, message: string, rule = 'agent-lint/execution'): CommandResult {
   const finding: Finding = {
     column: 1,
     file: join(cwd, 'package.json'),
     line: 1,
     message,
-    rule: 'agent-lint/usage',
+    rule,
     severity: 'error',
-    tool: 'doctor'
+    tool: 'agent-lint'
   }
   return { exitCode: 2, findings: [finding] }
 }
@@ -218,7 +217,7 @@ async function main(): Promise<void> {
   try {
     options = parseCli(process.argv.slice(2))
   } catch (error) {
-    const result = errorResult(cwd, error instanceof Error ? error.message : String(error))
+    const result = errorResult(cwd, error instanceof Error ? error.message : String(error), 'agent-lint/usage')
     writeResult(
       'agent-lint',
       result,
@@ -234,7 +233,7 @@ async function main(): Promise<void> {
     return
   }
   if (options.command === 'version') {
-    process.stdout.write(`${VERSION}\n`)
+    process.stdout.write(`${PACKAGE_VERSION}\n`)
     return
   }
 

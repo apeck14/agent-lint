@@ -33,12 +33,12 @@ try {
   mkdirSync(consumer)
   writeFileSync(
     join(consumer, 'package.json'),
-    `${JSON.stringify({ name: 'packed-consumer', packageManager: 'pnpm@11.25.0', private: true, type: 'module' })}\n`,
+    `${JSON.stringify({ name: 'packed-consumer', packageManager: 'pnpm@11.25.0', private: true })}\n`,
     'utf8'
   )
-  pnpm(['add', '--prefer-offline', '--ignore-scripts', '--save-exact', tarball], consumer)
+  pnpm(['add', '--offline', '--ignore-scripts', '--save-exact', tarball], consumer)
 
-  const installedRoot = join(consumer, 'node_modules', '@apehk', 'agent-lint')
+  const installedRoot = join(consumer, 'node_modules', '@apeck14', 'agent-lint')
   const manifest = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8'))
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), ['knip', 'oxfmt', 'oxlint'])
   for (const lifecycle of ['install', 'postinstall', 'preinstall', 'prepare']) {
@@ -51,20 +51,24 @@ try {
   assert.equal(typeof api.createOxlintConfig, 'function')
   assert.equal(typeof api.createOxfmtConfig, 'function')
 
-  writeFileSync(
-    join(consumer, 'oxlint.config.ts'),
-    "import { createOxlintConfig } from '@apehk/agent-lint'\nexport default createOxlintConfig()\n",
-    'utf8'
-  )
-  writeFileSync(
-    join(consumer, 'oxfmt.config.ts'),
-    "import { createOxfmtConfig } from '@apehk/agent-lint'\nexport default createOxfmtConfig()\n",
-    'utf8'
-  )
+  const cliPath = join(installedRoot, 'dist', 'cli.js')
+  const initialized = spawnSync(process.execPath, [cliPath, 'init', '--format', 'json'], {
+    cwd: consumer,
+    encoding: 'utf8',
+    env: { ...process.env, AGENT_LINT_SKIP_INSTALL: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
+    windowsHide: true
+  })
+  assert.equal(initialized.status, 0, initialized.stderr || initialized.stdout)
+  const initializedPackage = JSON.parse(readFileSync(join(consumer, 'package.json'), 'utf8'))
+  assert.equal(initializedPackage.devDependencies['@apeck14/agent-lint'], manifest.version)
+  assert.equal(initializedPackage.scripts.check, 'agent-lint check')
+  assert.match(readFileSync(join(consumer, 'AGENTS.md'), 'utf8'), /do not weaken rules or add ignores/)
+  assert.equal(readFileSync(join(consumer, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n')
+
   mkdirSync(join(consumer, 'src'))
   writeFileSync(join(consumer, 'src', 'index.ts'), 'export const ready = true\n', 'utf8')
 
-  const cli = spawnSync(process.execPath, [join(installedRoot, 'dist', 'cli.js'), 'check', 'src'], {
+  const cli = spawnSync(process.execPath, [cliPath, 'check', 'src'], {
     cwd: consumer,
     encoding: 'utf8',
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },

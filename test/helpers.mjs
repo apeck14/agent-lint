@@ -33,15 +33,16 @@ export function createProject(t, options = {}) {
     packageManager: 'npm@11.0.0',
     ...options.packageJson
   }
+  const configExtension = packageJson.type === 'module' ? 'ts' : 'mts'
   write(directory, 'package.json', `${JSON.stringify(packageJson, null, 2)}\n`)
   write(
     directory,
-    'oxlint.config.ts',
+    `oxlint.config.${configExtension}`,
     `import { createOxlintConfig } from '${packageEntry}'\nexport default createOxlintConfig(${JSON.stringify(options.oxlint ?? {})})\n`
   )
   write(
     directory,
-    'oxfmt.config.ts',
+    `oxfmt.config.${configExtension}`,
     `import { createOxfmtConfig } from '${packageEntry}'\nexport default createOxfmtConfig(${JSON.stringify(options.oxfmt ?? {})})\n`
   )
   return directory

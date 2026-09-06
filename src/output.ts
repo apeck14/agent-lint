@@ -26,10 +26,19 @@ function agentLine(finding: Finding): string {
   return `${finding.file}:${finding.line}:${finding.column} [${finding.rule}] ${finding.message.replaceAll(/\s+/g, ' ').trim()}`
 }
 
+function githubProperty(value: string): string {
+  return value
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+    .replaceAll(':', '%3A')
+    .replaceAll(',', '%2C')
+}
+
 function githubLine(finding: Finding): string {
   const command = finding.severity === 'warning' ? 'warning' : 'error'
   const escaped = finding.message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')
-  return `::${command} file=${finding.file},line=${finding.line},col=${finding.column},title=${finding.rule}::${escaped}`
+  return `::${command} file=${githubProperty(finding.file)},line=${finding.line},col=${finding.column},title=${githubProperty(finding.rule)}::${escaped}`
 }
 
 function rerunCommand(): string {
@@ -45,10 +54,12 @@ export function writeResult(
   cwd: string,
   githubActions = process.env.GITHUB_ACTIONS === 'true'
 ): void {
-  const normalized = sortFindings(result.findings).map((finding) => ({
-    ...finding,
-    file: normalizedFile(cwd, finding.file)
-  }))
+  const normalized = sortFindings(
+    result.findings.map((finding) => ({
+      ...finding,
+      file: normalizedFile(cwd, finding.file)
+    }))
+  )
   const limit = options.noDiagnosticLimit ? normalized.length : options.maxDiagnostics
   const shown = normalized.slice(0, limit)
   const omitted = normalized.length - shown.length

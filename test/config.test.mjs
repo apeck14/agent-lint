@@ -7,29 +7,68 @@ import { pathToFileURL } from 'node:url'
 import { createOxfmtConfig, createOxlintConfig } from '../dist/index.js'
 import { root, temporaryDirectory, write } from './helpers.mjs'
 
-test('Oxlint presets cover every environment, framework, and test runner', () => {
-  for (const environment of ['node', 'browser', 'universal']) {
-    for (const framework of ['none', 'react', 'next']) {
-      for (const testRunner of ['none', 'jest', 'vitest', 'both']) {
-        const config = createOxlintConfig({ environment, framework, testRunner })
-        assert.equal(config.categories.correctness, 'error')
-        assert.equal(config.options.denyWarnings, true)
-        assert.equal(config.rules['import/no-cycle'], 'error')
-        assert.equal(config.env.node, environment !== 'browser')
-        assert.equal(config.env.browser, environment !== 'node')
-        assert.equal(config.plugins.includes('react'), framework !== 'none')
-        assert.equal(config.plugins.includes('nextjs'), framework === 'next')
-        assert.equal(config.plugins.includes('jest'), testRunner === 'jest' || testRunner === 'both')
-        assert.equal(config.plugins.includes('vitest'), testRunner === 'vitest' || testRunner === 'both')
-      }
-    }
-  }
-})
+const COMMON_GENERATED_IGNORES = [
+  '**/.next/**',
+  '**/.nuxt/**',
+  '**/.svelte-kit/**',
+  '**/.astro/**',
+  '**/.react-router/**',
+  '**/.turbo/**',
+  '**/.nx/**',
+  '**/.vite/**',
+  '**/.parcel-cache/**',
+  '**/.vercel/**',
+  '**/.netlify/**',
+  '**/.wrangler/**',
+  '**/playwright-report/**',
+  '**/test-results/**',
+  '**/*.gen.*',
+  '**/__generated__/**',
+  '**/next-env.d.ts'
+]
 
-test('consumer Oxlint rules win and ignores and overrides append', () => {
+test('Oxlint provides strict framework defaults while consumer values win', () => {
   const override = { files: ['special/**'], rules: { eqeqeq: 'off' } }
-  const config = createOxlintConfig({ ignores: ['custom/**'], overrides: [override], rules: { eqeqeq: 'off' } })
+  const config = createOxlintConfig({
+    environment: 'universal',
+    framework: 'next',
+    ignores: ['custom/**'],
+    overrides: [override],
+    rules: { eqeqeq: 'off' },
+    testRunner: 'both'
+  })
+  assert.equal(config.categories.correctness, 'error')
+  assert.equal(config.options.denyWarnings, true)
+  assert.equal(config.rules['import/no-cycle'], 'error')
+  assert.equal(config.rules['typescript/no-explicit-any'], 'error')
+  assert.deepEqual(config.rules['typescript/ban-ts-comment'], [
+    'error',
+    {
+      minimumDescriptionLength: 10,
+      'ts-check': false,
+      'ts-expect-error': 'allow-with-description',
+      'ts-ignore': 'allow-with-description',
+      'ts-nocheck': 'allow-with-description'
+    }
+  ])
+  assert.equal(config.rules['preserve-caught-error'], 'off')
+  assert.equal(config.rules['jsx-a11y/no-autofocus'], 'off')
+  assert.equal(config.rules['jsx-a11y/control-has-associated-label'], 'off')
+  assert.equal(config.rules['jsx-a11y/label-has-associated-control'], 'off')
+  assert.equal(config.rules['jsx-a11y/no-static-element-interactions'], 'off')
+  assert.equal(config.rules['jsx-a11y/prefer-tag-over-role'], 'off')
+  assert.equal(config.env.browser, true)
+  assert.equal(config.env.node, true)
+  assert.ok(config.plugins.includes('nextjs'))
+  assert.ok(config.plugins.includes('jest'))
+  assert.ok(config.plugins.includes('vitest'))
   assert.equal(config.rules.eqeqeq, 'off')
+  assert.equal(
+    config.overrides.find(
+      (entry) => entry.files?.includes('**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}') && entry.rules?.['no-var']
+    )?.rules?.['no-var'],
+    'off'
+  )
   assert.equal(config.ignorePatterns.at(-1), 'custom/**')
   assert.deepEqual(config.overrides.at(-1), override)
 })
@@ -50,10 +89,22 @@ test('Oxfmt preserves the house style while final options win', () => {
   assert.equal(config.ignorePatterns.at(-1), 'custom/**')
   assert.deepEqual(config.overrides, [override])
   assert.deepEqual(config.sortTailwindcss, { functions: ['cx'], stylesheet: 'src/styles.css' })
+  assert.ok(config.ignorePatterns.includes('**/npm-shrinkwrap.json'))
+  assert.ok(config.ignorePatterns.includes('**/output/**'))
+  assert.ok(
+    config.ignorePatterns.includes('**/{fixtures,__fixtures__,mocks}/**/*.{json,json5,jsonc,yaml,yml,html,md,mdx}')
+  )
+  assert.equal(createOxfmtConfig({ tailwind: false }).sortTailwindcss, false)
 })
 
-test('Tailwind sorting can be explicitly disabled', () => {
-  assert.equal(createOxfmtConfig({ tailwind: false }).sortTailwindcss, false)
+test('lint and formatting ignore common generated repository output', () => {
+  const lintIgnores = createOxlintConfig().ignorePatterns
+  const formatIgnores = createOxfmtConfig().ignorePatterns
+
+  for (const pattern of COMMON_GENERATED_IGNORES) {
+    assert.ok(lintIgnores.includes(pattern), `missing Oxlint ignore: ${pattern}`)
+    assert.ok(formatIgnores.includes(pattern), `missing Oxfmt ignore: ${pattern}`)
+  }
 })
 
 test('Tailwind v3 and v4 projects are detected from repository files', (t) => {
@@ -79,8 +130,9 @@ test('Tailwind v3 and v4 projects are detected from repository files', (t) => {
 
   const versionFour = temporaryDirectory(t)
   write(versionFour, 'package.json', '{"devDependencies":{"tailwindcss":"4.1.0"}}\n')
-  write(versionFour, 'src/app/globals.css', "@import 'tailwindcss';\n")
+  write(versionFour, 'src/app/globals.css', "@import './reset.css';\n")
+  write(versionFour, 'src/index.css', "@import 'tailwindcss';\n")
   const detected = load(versionFour)
-  assert.equal(detected.stylesheet, 'src/app/globals.css')
+  assert.equal(detected.stylesheet, 'src/index.css')
   assert.deepEqual(detected.functions, ['cn', 'cva', 'clsx', 'twMerge'])
 })

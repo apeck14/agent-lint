@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { existsSync, symlinkSync } from 'node:fs'
 import test from 'node:test'
 
-import { createProject, git, jsonResult, root, run, snapshot, write } from './helpers.mjs'
+import { parseKnip } from '../dist/tool-results.js'
+import { createProject, git, jsonResult, root, run, snapshot, temporaryDirectory, write } from './helpers.mjs'
 
 test('changed mode includes staged and untracked files', (t) => {
   const directory = createProject(t)
@@ -46,6 +47,7 @@ test('changed mode fails outside Git and invalid refs fail clearly', (t) => {
   git(repository, ['commit', '-m', 'fixture'])
   const since = run(repository, ['check', '--since', 'not-a-ref', '--format', 'json'])
   assert.equal(since.status, 2)
+  assert.equal(jsonResult(since).findings[0].tool, 'agent-lint')
   assert.match(jsonResult(since).findings[0].message, /not-a-ref|merge base/i)
 })
 
@@ -87,6 +89,14 @@ test('typecheck uses a non-recursive script and rejects recursion', (t) => {
   const failed = run(recursive, ['check', 'src', '--typecheck', '--format', 'json'])
   assert.equal(failed.status, 2)
   assert.match(jsonResult(failed).findings[0].rule, /recursive-script/)
+
+  const indirect = createProject(t, {
+    packageJson: { scripts: { check: 'agent-lint check --typecheck', typecheck: 'npm run check' } }
+  })
+  write(indirect, 'src/index.ts', 'export const value = true\n')
+  const indirectFailure = run(indirect, ['check', 'src', '--typecheck', '--format', 'json'])
+  assert.equal(indirectFailure.status, 2)
+  assert.match(jsonResult(indirectFailure).findings[0].rule, /recursive-script/)
 })
 
 test('direct typecheck uses the repository compiler with jsconfig', (t) => {
@@ -127,10 +137,41 @@ test('deadcode reports unused files and never deletes them', (t) => {
   assert.equal(existsSync(`${directory}/src/unused.js`), true)
 })
 
-test('doctor separates operational failures from advice', (t) => {
+test('deadcode does not report native tool configurations as unused files', () => {
+  const result = parseKnip(
+    {
+      exitCode: 1,
+      stderr: '',
+      stdout: JSON.stringify({
+        issues: [
+          { file: 'oxlint.config.ts', files: ['oxlint.config.ts'] },
+          { file: 'src/unused.js', files: ['src/unused.js'] }
+        ]
+      })
+    },
+    root
+  )
+  assert.equal(result.exitCode, 1)
+  assert.deepEqual(
+    result.findings.map((finding) => finding.file.replaceAll('\\', '/')),
+    [`${root.replaceAll('\\', '/')}/src/unused.js`]
+  )
+
+  const onlyConfigurations = parseKnip(
+    {
+      exitCode: 1,
+      stderr: '',
+      stdout: JSON.stringify({ issues: [{ file: 'oxfmt.config.mts', files: ['oxfmt.config.mts'] }] })
+    },
+    root
+  )
+  assert.deepEqual(onlyConfigurations, { exitCode: 0, findings: [] })
+})
+
+test('doctor is read-only for a valid installation', (t) => {
   const directory = createProject(t, {
     packageJson: {
-      devDependencies: { '@apehk/agent-lint': '1.0.0', eslint: '10.0.0' },
+      devDependencies: { '@apeck14/agent-lint': '1.0.0' },
       scripts: {
         check: 'agent-lint check',
         deadcode: 'agent-lint deadcode',
@@ -145,22 +186,55 @@ test('doctor separates operational failures from advice', (t) => {
   write(
     directory,
     'oxlint.config.ts',
-    "import { createOxlintConfig } from '@apehk/agent-lint'\nexport default createOxlintConfig()\n"
+    "import { createOxlintConfig } from '@apeck14/agent-lint'\nexport default createOxlintConfig()\n"
   )
   write(
     directory,
     'oxfmt.config.ts',
-    "import { createOxfmtConfig } from '@apehk/agent-lint'\nexport default createOxfmtConfig()\n"
+    "import { createOxfmtConfig } from '@apeck14/agent-lint'\nexport default createOxfmtConfig()\n"
   )
-  write(directory, 'AGENTS.md', `${Array.from({ length: 110 }, () => 'root instruction').join('\n')}\n`)
-  write(directory, 'packages/app/AGENTS.md', `${Array.from({ length: 110 }, () => 'nested instruction').join('\n')}\n`)
-  write(directory, '.cursorrules', 'Use AGENTS.md.\n')
   const before = snapshot(directory)
   const result = run(directory, ['doctor', '--format', 'json'])
   const output = jsonResult(result)
   assert.equal(result.status, 0, result.stderr || result.stdout)
-  assert.match(output.notes.join('\n'), /competing tooling/)
-  assert.match(output.notes.join('\n'), /effective agent instructions/)
-  assert.match(output.notes.join('\n'), /\.cursorrules/)
+  assert.equal(output.total, 0)
   assert.deepEqual(snapshot(directory), before)
+})
+
+test('doctor reports an invalid package manifest as an execution failure', (t) => {
+  const directory = temporaryDirectory(t)
+  write(directory, 'package.json', 'null\n')
+  const result = run(directory, ['doctor', '--format', 'json'])
+  assert.equal(result.status, 2)
+  assert.match(jsonResult(result).findings[0].message, /root value must be an object/)
+})
+
+test('doctor advises when Git does not preserve formatter line endings', (t) => {
+  const directory = createProject(t, {
+    packageJson: {
+      devDependencies: { '@apeck14/agent-lint': '1.0.0' },
+      scripts: {
+        check: 'agent-lint check',
+        deadcode: 'agent-lint deadcode',
+        fix: 'agent-lint fix',
+        format: 'agent-lint format --write',
+        'format:check': 'agent-lint format --check',
+        lint: 'agent-lint lint',
+        'lint:fix': 'agent-lint lint --fix'
+      }
+    }
+  })
+  write(
+    directory,
+    'oxlint.config.ts',
+    "import { createOxlintConfig } from '@apeck14/agent-lint'\nexport default createOxlintConfig()\n"
+  )
+  write(
+    directory,
+    'oxfmt.config.ts',
+    "import { createOxfmtConfig } from '@apeck14/agent-lint'\nexport default createOxfmtConfig()\n"
+  )
+  const result = run(directory, ['doctor', '--format', 'json'])
+  assert.equal(result.status, 0, result.stderr || result.stdout)
+  assert.match(jsonResult(result).notes.join('\n'), /Windows checkouts may fail formatting/)
 })

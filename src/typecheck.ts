@@ -49,12 +49,33 @@ function resolveTypeScript(cwd: string): string | undefined {
   }
 }
 
+function referencedScripts(script: string, scripts: Record<string, string>): string[] {
+  const references = new Set<string>()
+  const matcher = /\b(?:bun|npm|pnpm|yarn)\s+(?:run(?:-script)?\s+)?([\w:-]+)/g
+  for (const match of script.matchAll(matcher)) {
+    const name = match[1]
+    if (name && scripts[name]) references.add(name)
+  }
+  return [...references]
+}
+
+function recursiveTypecheck(scripts: Record<string, string>, name = 'typecheck', active = new Set<string>()): boolean {
+  if (active.has(name)) return true
+  const script = scripts[name]
+  if (!script) return false
+  if (/\bagent-lint(?:\.cmd)?\b/.test(script)) return true
+
+  const next = new Set(active)
+  next.add(name)
+  return referencedScripts(script, scripts).some((reference) => recursiveTypecheck(scripts, reference, next))
+}
+
 export async function runTypecheck(cwd: string): Promise<CommandResult> {
   const packageJson = readPackageJson(cwd)
   const script = packageJson.scripts?.typecheck
 
   if (script) {
-    if (/\bagent-lint\b/.test(script)) {
+    if (recursiveTypecheck(packageJson.scripts ?? {})) {
       return {
         exitCode: 2,
         findings: [
@@ -62,7 +83,7 @@ export async function runTypecheck(cwd: string): Promise<CommandResult> {
             column: 1,
             file: join(cwd, 'package.json'),
             line: 1,
-            message: 'The typecheck script invokes agent-lint and would recurse',
+            message: 'The typecheck script would recurse directly or through another package script',
             rule: 'typescript/recursive-script',
             severity: 'error',
             tool: 'typescript'

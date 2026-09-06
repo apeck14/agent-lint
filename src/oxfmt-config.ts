@@ -3,36 +3,16 @@ import { join } from 'node:path'
 
 import type { Oxfmtrc, SortTailwindcssUserConfig } from 'oxfmt'
 
+import { COMMON_IGNORE_PATTERNS, FORMAT_ONLY_IGNORE_PATTERNS } from './ignore-patterns.js'
 import type { OxfmtPresetOptions, TailwindPreset } from './types.js'
-
-const BASE_IGNORES = [
-  '**/node_modules/**',
-  '**/dist/**',
-  '**/build/**',
-  '**/coverage/**',
-  '**/.next/**',
-  '**/out/**',
-  '**/.cache/**',
-  '**/.turbo/**',
-  '**/.vercel/**',
-  '**/vendor/**',
-  '**/*.min.*',
-  '**/*.snap',
-  '**/*.generated.*',
-  '**/generated/**',
-  '**/package-lock.json',
-  '**/pnpm-lock.yaml',
-  '**/yarn.lock',
-  '**/bun.lock',
-  '**/bun.lockb'
-]
 
 const TAILWIND_CONFIGS = [
   'tailwind.config.ts',
   'tailwind.config.mts',
   'tailwind.config.js',
   'tailwind.config.mjs',
-  'tailwind.config.cjs'
+  'tailwind.config.cjs',
+  'tailwind.config.cts'
 ]
 
 const TAILWIND_STYLESHEETS = [
@@ -40,8 +20,13 @@ const TAILWIND_STYLESHEETS = [
   'app/globals.css',
   'src/styles/globals.css',
   'styles/globals.css',
+  'src/globals.css',
+  'src/styles.css',
   'src/index.css',
-  'src/app.css'
+  'src/app.css',
+  'globals.css',
+  'index.css',
+  'app.css'
 ]
 
 const TAILWIND_FUNCTIONS = ['cn', 'cva', 'clsx', 'twMerge']
@@ -71,7 +56,7 @@ function detectedTailwind(cwd: string): SortTailwindcssUserConfig {
     const absolute = join(cwd, path)
     if (!existsSync(absolute)) return false
     const content = readFileSync(absolute, 'utf8')
-    return /@(?:import|tailwind|theme|utility|custom-variant)\b/.test(content)
+    return /@import\s+['"]tailwindcss(?:\/[^'"]*)?['"]|@(?:tailwind|theme|utility|custom-variant)\b/.test(content)
   })
 
   return {
@@ -97,7 +82,7 @@ export function createOxfmtConfig(options: OxfmtPresetOptions = {}): Oxfmtrc {
 
   return {
     endOfLine: 'lf',
-    ignorePatterns: [...BASE_IGNORES, ...(options.ignores ?? [])],
+    ignorePatterns: [...COMMON_IGNORE_PATTERNS, ...FORMAT_ONLY_IGNORE_PATTERNS, ...(options.ignores ?? [])],
     jsxSingleQuote: true,
     printWidth: 120,
     semi: false,

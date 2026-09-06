@@ -1,10 +1,14 @@
-import { isAbsolute, join } from 'node:path'
+import { basename, isAbsolute, join } from 'node:path'
 
 import type { CommandResult, Finding, RunResult } from './cli-types.js'
+import { OXFMT_CONFIG_NAMES, OXLINT_CONFIG_NAMES } from './config-files.js'
+
+const TOOL_CONFIG_NAMES = new Set<string>([...OXFMT_CONFIG_NAMES, ...OXLINT_CONFIG_NAMES])
 
 interface OxlintDiagnostic {
   code?: string
   filename?: string
+  help?: string
   labels?: Array<{ span?: { column?: number; line?: number } }>
   message?: string
   severity?: string
@@ -19,8 +23,10 @@ function absolute(cwd: string, path: string | undefined): string {
   return isAbsolute(path) ? path : join(cwd, path)
 }
 
-function oxlintRule(code: string | undefined): string {
-  if (!code) return 'oxlint'
+function oxlintRule(code: string | undefined, message: string | undefined): string {
+  if (!code) {
+    return /^Unused (?:eslint|oxlint)-disable directive\b/.test(message ?? '') ? 'oxlint/unused-disable' : 'oxlint'
+  }
   const match = /^([^()]+)\(([^()]+)\)$/.exec(code)
   if (!match) return code
   const plugin = match[1] === 'typescript-eslint' ? 'typescript' : match[1]
@@ -59,12 +65,14 @@ export function parseOxlint(result: RunResult, cwd: string): CommandResult {
 
   const findings: Finding[] = (parsed.diagnostics ?? []).map((diagnostic) => {
     const span = diagnostic.labels?.find((label) => label.span)?.span
+    const message = diagnostic.message ?? 'Unknown lint violation'
+    const help = diagnostic.help?.trim()
     return {
       column: span?.column ?? 1,
       file: absolute(cwd, diagnostic.filename),
       line: span?.line ?? 1,
-      message: diagnostic.message ?? 'Unknown lint violation',
-      rule: oxlintRule(diagnostic.code),
+      message: help && !message.includes(help) ? `${message} ${help}` : message,
+      rule: oxlintRule(diagnostic.code, diagnostic.message),
       severity: diagnostic.severity === 'warning' ? 'warning' : 'error',
       tool: 'oxlint'
     }
@@ -119,6 +127,7 @@ function knipFindings(value: unknown, cwd: string): Finding[] {
       for (const entry of entries) {
         const detail = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : undefined
         const name = typeof entry === 'string' ? entry : typeof detail?.name === 'string' ? detail.name : issueType
+        if (issueType === 'files' && TOOL_CONFIG_NAMES.has(basename(name))) continue
         findings.push({
           column: typeof detail?.col === 'number' ? detail.col : 1,
           file: absolute(cwd, file),
@@ -140,7 +149,10 @@ export function parseKnip(result: RunResult, cwd: string): CommandResult {
   try {
     const parsed = JSON.parse(result.stdout) as unknown
     const findings = knipFindings(parsed, cwd)
-    if (result.exitCode !== 0 && findings.length === 0) return executionFailure('knip', cwd, result)
+    const hasIssueEnvelope =
+      parsed !== null && typeof parsed === 'object' && Array.isArray((parsed as { issues?: unknown }).issues)
+    if (result.exitCode !== 0 && findings.length === 0 && !hasIssueEnvelope)
+      return executionFailure('knip', cwd, result)
     return { exitCode: findings.length > 0 ? 1 : 0, findings }
   } catch {
     if (result.exitCode === 0) return { exitCode: 0, findings: [] }

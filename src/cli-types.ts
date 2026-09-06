@@ -6,8 +6,8 @@ export interface Finding {
   line: number
   message: string
   rule: string
-  severity: 'error' | 'warning' | 'advice'
-  tool: 'oxlint' | 'oxfmt' | 'typescript' | 'knip' | 'doctor' | 'init'
+  severity: 'error' | 'warning'
+  tool: 'agent-lint' | 'oxlint' | 'oxfmt' | 'typescript' | 'knip' | 'doctor' | 'init'
 }
 
 export interface CommandResult {
@@ -24,7 +24,6 @@ export interface SharedOptions {
 }
 
 export interface RunResult {
-  command: string
   error?: Error
   exitCode: number
   stderr: string

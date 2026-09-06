@@ -29,9 +29,15 @@ export function readPackageJson(cwd: string): PackageJson {
   if (!existsSync(path)) throw new Error(`No package.json found in ${cwd}`)
 
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as PackageJson
+    const value = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('the root value must be an object')
+    }
+    return value as PackageJson
   } catch (error) {
-    throw new Error(`Could not parse package.json: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`Could not parse package.json: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error
+    })
   }
 }
 
@@ -59,14 +65,8 @@ export function detectPackageManager(cwd: string, packageJson = readPackageJson(
   return matches[0]?.[0] ?? 'npm'
 }
 
-export function packageManagerRunArgs(
-  manager: PackageManager,
-  script: string,
-  extra: string[] = []
-): [string, string[]] {
-  if (manager === 'npm') return ['npm', ['run', script, ...(extra.length > 0 ? ['--', ...extra] : [])]]
-  if (manager === 'yarn') return ['yarn', ['run', script, ...extra]]
-  return [manager, ['run', script, ...extra]]
+export function packageManagerRunArgs(manager: PackageManager, script: string): [string, string[]] {
+  return [manager, ['run', script]]
 }
 
 export function packageManagerAddArgs(manager: PackageManager, specifier: string): [string, string[]] {
