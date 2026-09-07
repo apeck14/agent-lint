@@ -7,7 +7,7 @@ is especially suited to TypeScript services, APIs, bots, workers, React and Next
 
 - ⚡ Runs native linting and formatting concurrently for short feedback loops.
 - 🧠 Returns deterministic one-line diagnostics capped at 50, reducing agent token and context usage.
-- Catches common mistakes such as unresolved or cyclic imports, ignored promises, unsafe TypeScript escapes, stale
+- Catches common mistakes such as cyclic imports, unhandled Promise chains, unsafe TypeScript escapes, stale
   suppressions, broken React behavior, and focused or disabled tests.
 - Formats code and common text formats consistently, reducing noisy diffs and repeated style decisions.
 - Automates only safe fixes; slower dead-code analysis remains available on demand.
@@ -28,13 +28,11 @@ Requires Node.js 22.18 or newer. npm, pnpm, Yarn, and Bun repositories are suppo
 npx --yes @apeck14/agent-lint@1.0.0 init
 ```
 
-The initializer is non-interactive and safe to run again. It:
+The initializer detects your tooling, installs an exact dev dependency, creates typed configs and package scripts, and
+adds a short workflow to `AGENTS.md`. It runs without prompts and preserves custom files and scripts, reporting conflicts.
 
-- Detects the package manager, runtime, TypeScript, framework, and test runner.
-- Installs an exact development dependency.
-- Creates typed configuration and useful package scripts.
-- Adds a concise managed workflow to `AGENTS.md`.
-- Preserves custom files and reports conflicts instead of overwriting them.
+Rerunning `init` preserves edits to generated configuration, including factory options. If the detected framework or
+test runner changes, update those options manually.
 
 Preview the exact changes without writing:
 
@@ -52,32 +50,34 @@ pnpm check         # before finishing
 pnpm deadcode      # after changing modules or dependencies
 ```
 
+Run relevant tests too; `check` does not run them.
+
 `--changed` includes staged, unstaged, renamed, and untracked files. If unrelated work is present, pass only the paths
-you edited.
+you edited. When run inside a monorepo package, Git selection stays within that directory.
 
 ## 🧰 Commands
 
-| Command                                                    | Purpose                                                                    |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `check [paths] [--changed \| --since <ref>] [--typecheck]` | Lint and format concurrently, optionally with typechecking                 |
-| `fix [paths] [--changed \| --since <ref>]`                 | Apply safe lint fixes, then format                                         |
-| `lint [paths] [--fix]`                                     | Run Oxlint only                                                            |
-| `format [paths] [--check \| --write]`                      | Run Oxfmt; check is the default                                            |
-| `deadcode [--production]`                                  | Report unused files, exports, and dependencies without modifying files     |
-| `init [--dry-run]`                                         | Configure a repository safely                                              |
-| `doctor`                                                   | Diagnose installation, configuration, CI, instruction, and security issues |
+| Command    | Purpose                                                                             |
+| ---------- | ----------------------------------------------------------------------------------- |
+| `check`    | Check lint and formatting; add `--typecheck` for compiler diagnostics               |
+| `fix`      | Apply safe lint fixes, then format                                                  |
+| `lint`     | Lint only; add `--fix` for safe fixes                                               |
+| `format`   | Check formatting; use `--write` to apply it                                         |
+| `deadcode` | Report unused files, exports, and dependencies; supports `--production`             |
+| `init`     | Configure a repository; use `--dry-run` to preview                                  |
+| `doctor`   | Inspect setup, CI wiring, agent instructions, and potential tracked secrets offline |
+
+`check`, `fix`, `lint`, and `format` accept file or directory paths. `check` and `fix` also support `--changed` or
+`--since <ref>` instead of paths.
 
 For example, `pnpm exec agent-lint check --since origin/main` checks everything changed since the branch diverged from
 `origin/main`, plus current working-tree changes.
 
-Paths cannot be combined with `--changed` or `--since`. Output options are `--format agent|human|json`,
+Output options are `--format agent|human|json`,
 `--max-diagnostics <n>`, and `--no-diagnostic-limit`. Exit codes are `0` for clean, `1` for findings, and `2` for
 configuration or execution failures.
 
 ## 🛡️ Guardrails and defaults
-
-The defaults are strict where mistakes are likely to become bugs and practical around tests, generated files, and
-tooling.
 
 - All enabled rules are errors; warnings cannot accumulate unnoticed.
 - `_`-prefixed variables and parameters are intentional.
@@ -91,14 +91,17 @@ tooling.
 - `check --typecheck` uses the repository's non-recursive `typecheck` script or its installed TypeScript compiler. No
   bundled compiler is substituted.
 
+Lint rules are syntax-based, including Promise-chain checks. Type-aware floating-Promise analysis is not included.
+`check --typecheck` adds compiler diagnostics, such as unresolved TypeScript imports, rather than type-aware lint rules.
+
 Findings stay compact and immediately actionable:
 
 ```text
 src/example.ts:4:7 [typescript/no-explicit-any] Unexpected any. Specify a different type.
 ```
 
-GitHub Actions receives annotations automatically. If output is truncated, the summary includes the exact command for
-an unlimited rerun.
+GitHub Actions receives annotations unless you select an output format. Truncated output includes the command for an
+unlimited rerun.
 
 ## 🔧 Customization
 
@@ -130,17 +133,7 @@ and final formatter overrides. Set `tailwind: false` to disable Tailwind sorting
 Repository-specific import restrictions are particularly useful for agents. Include the preferred replacement in the
 rule message so the diagnostic explains how to repair the problem.
 
-## 🧠 Design choices
-
-- **Oxc is the foundation** because native linting and formatting keep feedback loops fast.
-- **Knip stays on demand** because structural analysis is useful after module or dependency changes, not every edit.
-- **Instructions stay short** because always-loaded guidance consumes context and does not consistently improve results.
-
-- [Oxc coding-agent guidance](https://oxc.rs/docs/guide/usage/coding-agents.html)
-- [AGENTS.md evaluation](https://arxiv.org/abs/2602.11988)
-- [Configuration-smell study](https://arxiv.org/abs/2606.15828)
-
-`doctor` is offline and read-only. The package has no consumer-mutating lifecycle scripts.
+There are no install-time scripts or automatic hooks. `doctor` and `deadcode` are read-only.
 
 ## License
 

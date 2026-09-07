@@ -12,7 +12,13 @@
     "oxlint",
     "typescript"
   ],
+  "homepage": "https://github.com/apeck14/agent-lint#readme",
+  "bugs": "https://github.com/apeck14/agent-lint/issues",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apeck14/agent-lint.git"
+  },
   "bin": {
     "agent-lint": "dist/cli.js"
   },
