@@ -36,7 +36,12 @@ try {
     `${JSON.stringify({ name: 'packed-consumer', packageManager: 'pnpm@11.25.0', private: true })}\n`,
     'utf8'
   )
-  pnpm(['add', '--offline', '--ignore-scripts', '--save-exact', tarball], consumer)
+  writeFileSync(
+    join(consumer, 'pnpm-workspace.yaml'),
+    'minimumReleaseAge: 10080\nminimumReleaseAgeStrict: true\n',
+    'utf8'
+  )
+  pnpm(['add', '--prefer-offline', '--ignore-scripts', '--save-exact', tarball], consumer)
 
   const installedRoot = join(consumer, 'node_modules', '@apeck14', 'agent-lint')
   const manifest = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8'))
