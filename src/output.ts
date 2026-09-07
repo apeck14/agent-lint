@@ -42,9 +42,11 @@ function githubLine(finding: Finding): string {
 }
 
 function rerunCommand(): string {
-  const args = process.argv.slice(2).filter((value) => value !== '--no-diagnostic-limit')
+  const args = process.argv.slice(2)
+  const separator = args.indexOf('--')
+  args.splice(separator < 0 ? args.length : separator, 0, '--no-diagnostic-limit')
   const rendered = args.map((value) => (/^[\w./:@=-]+$/.test(value) ? value : JSON.stringify(value)))
-  return `agent-lint ${[...rendered, '--no-diagnostic-limit'].join(' ')}`
+  return `agent-lint ${rendered.join(' ')}`
 }
 
 export function writeResult(

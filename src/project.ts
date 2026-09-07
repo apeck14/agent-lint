@@ -19,7 +19,7 @@ export interface PackageJson {
 
 const LOCKFILES: Record<PackageManager, string[]> = {
   bun: ['bun.lock', 'bun.lockb'],
-  npm: ['package-lock.json'],
+  npm: ['package-lock.json', 'npm-shrinkwrap.json'],
   pnpm: ['pnpm-lock.yaml'],
   yarn: ['yarn.lock']
 }

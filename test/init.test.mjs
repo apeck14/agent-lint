@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { PACKAGE_VERSION } from '../dist/package-metadata.js'
 import { jsonResult, read, run, snapshot, temporaryDirectory, write } from './helpers.mjs'
 
 test('init dry-run reports exact changes without writing', (t) => {
@@ -11,7 +12,11 @@ test('init dry-run reports exact changes without writing', (t) => {
   const result = run(directory, ['init', '--dry-run', '--format', 'json'])
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.deepEqual(snapshot(directory), before)
-  assert.match(jsonResult(result).notes.join('\n'), /install @apeck14\/agent-lint@1\.0\.0 as an exact dev dependency/)
+  assert.ok(
+    jsonResult(result)
+      .notes.join('\n')
+      .includes(`install @apeck14/agent-lint@${PACKAGE_VERSION} as an exact dev dependency`)
+  )
   assert.match(jsonResult(result).notes.join('\n'), /create oxlint\.config\.mts/)
   assert.match(jsonResult(result).notes.join('\n'), /create \.gitattributes with LF normalization/)
   assert.match(jsonResult(result).notes.join('\n'), /review competing tooling before removal: \.prettierrc/)
@@ -36,7 +41,7 @@ test('init is deterministic, detects presets, and is byte-for-byte idempotent', 
   assert.match(read(directory, 'oxlint.config.ts'), /testRunner: 'jest'/)
   assert.equal(read(directory, 'CLAUDE.md'), '@AGENTS.md\n')
   const packageJson = JSON.parse(read(directory, 'package.json'))
-  assert.equal(packageJson.devDependencies['@apeck14/agent-lint'], '1.0.0')
+  assert.equal(packageJson.devDependencies['@apeck14/agent-lint'], PACKAGE_VERSION)
   assert.equal(packageJson.scripts.check, 'agent-lint check')
 })
 
@@ -51,6 +56,48 @@ test('init does not mistake server-rendered React for a browser runtime', (t) =>
   assert.equal(result.status, 0, result.stderr || result.stdout)
   assert.match(read(directory, 'oxlint.config.ts'), /environment: 'node'/)
   assert.match(read(directory, 'oxlint.config.ts'), /framework: 'react'/)
+})
+
+test('init preserves edited generated options even when migrating config extensions', (t) => {
+  const directory = temporaryDirectory(t)
+  write(directory, 'package.json', '{"name":"fixture","type":"module"}\n')
+  const env = { AGENT_LINT_SKIP_INSTALL: '1' }
+  assert.equal(run(directory, ['init'], { env }).status, 0)
+  const lint = read(directory, 'oxlint.config.ts').replace(
+    "framework: 'none'",
+    "framework: 'react', ignores: ['custom/**']"
+  )
+  const format = read(directory, 'oxfmt.config.ts').replace(
+    'createOxfmtConfig()',
+    'createOxfmtConfig({ format: { printWidth: 80 } })'
+  )
+  write(directory, 'oxlint.config.ts', lint)
+  write(directory, 'oxfmt.config.ts', format)
+  const before = snapshot(directory)
+  assert.equal(run(directory, ['init'], { env }).status, 0)
+  assert.deepEqual(snapshot(directory), before)
+
+  const manifest = JSON.parse(read(directory, 'package.json'))
+  delete manifest.type
+  write(directory, 'package.json', `${JSON.stringify(manifest)}\n`)
+  const beforeMigration = snapshot(directory)
+  assert.equal(run(directory, ['init', '--dry-run'], { env }).status, 0)
+  assert.deepEqual(snapshot(directory), beforeMigration)
+  assert.equal(run(directory, ['init'], { env }).status, 0)
+  assert.equal(read(directory, 'oxlint.config.mts'), lint)
+  assert.equal(read(directory, 'oxfmt.config.mts'), format)
+  assert.equal(snapshot(directory)['oxlint.config.ts'], undefined)
+})
+
+test('npm shrinkwrap participates in package-manager conflict detection', (t) => {
+  const directory = temporaryDirectory(t)
+  write(directory, 'package.json', '{"name":"fixture","packageManager":"pnpm@11.25.0"}\n')
+  write(directory, 'npm-shrinkwrap.json', '{}\n')
+  const before = snapshot(directory)
+  const result = run(directory, ['init', '--dry-run', '--format', 'json'])
+  assert.equal(result.status, 2, result.stdout)
+  assert.match(jsonResult(result).findings[0].message, /repository has a npm lockfile/)
+  assert.deepEqual(snapshot(directory), before)
 })
 
 test('init preserves custom files and script collisions', (t) => {
@@ -81,7 +128,7 @@ test('init keeps agent-lint only as an exact development dependency', (t) => {
   const result = run(directory, ['init', '--format', 'json'], { env: { AGENT_LINT_SKIP_INSTALL: '1' } })
   assert.equal(result.status, 0, result.stderr || result.stdout)
   const packageJson = JSON.parse(read(directory, 'package.json'))
-  assert.equal(packageJson.devDependencies['@apeck14/agent-lint'], '1.0.0')
+  assert.equal(packageJson.devDependencies['@apeck14/agent-lint'], PACKAGE_VERSION)
   assert.equal(packageJson.dependencies, undefined)
 })
 

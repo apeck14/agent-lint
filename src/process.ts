@@ -7,7 +7,7 @@ import type { RunResult } from './cli-types.js'
 
 export function runProcess(command: string, args: string[], cwd: string): Promise<RunResult> {
   return new Promise((resolve) => {
-    const isWindowsCommand = process.platform === 'win32' && /^(?:bun|bunx|npm|npx|pnpm|yarn)$/.test(command)
+    const isWindowsCommand = process.platform === 'win32' && /^(?:npm|npx|pnpm|yarn)$/.test(command)
     const executable = isWindowsCommand ? (process.env.ComSpec ?? 'cmd.exe') : command
     const processArgs = isWindowsCommand ? ['/d', '/s', '/c', `${command}.cmd`, ...args] : args
     const child = spawn(executable, processArgs, {

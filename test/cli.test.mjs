@@ -87,6 +87,40 @@ test('paths beginning with a dash remain filenames through check and fix', (t) =
   assert.equal(read(directory, '-input.ts'), 'export const value = 1\n')
 })
 
+test('truncated diagnostics put the unlimited rerun flag before the path separator', (t) => {
+  const directory = createProject(t)
+  write(directory, '-input.ts', 'debugger\ndebugger\n')
+  const result = run(directory, ['lint', '--max-diagnostics', '1', '--format', 'json', '--', '-input.ts'])
+  const rerun = jsonResult(result).rerun
+  assert.match(rerun, /--no-diagnostic-limit -- -input\.ts$/)
+  const unlimited = run(directory, rerun.split(' ').slice(1))
+  assert.equal(unlimited.status, 1, unlimited.stdout)
+  assert.equal(jsonResult(unlimited).total, 2)
+  assert.equal(jsonResult(unlimited).omitted, 0)
+})
+
+test('formatter failures remain visible alongside files needing formatting', (t) => {
+  const directory = createProject(t)
+  write(directory, 'src/style.ts', 'export const value="hello";\n')
+  write(directory, 'src/broken.ts', 'const = broken\n')
+  const result = run(directory, ['format', 'src', '--format', 'json'])
+  assert.equal(result.status, 2, result.stdout)
+  const findings = jsonResult(result).findings
+  assert.ok(findings.some((finding) => finding.rule === 'format' && finding.file === 'src/style.ts'))
+  assert.ok(findings.some((finding) => finding.rule === 'oxfmt/execution' && finding.message.includes('src/broken.ts')))
+})
+
+test('Promise executors cannot silently discard returned values', (t) => {
+  const directory = createProject(t)
+  write(directory, 'src/promise.ts', 'export const value = new Promise(() => { return 42 })\n')
+  const result = run(directory, ['lint', 'src/promise.ts', '--format', 'json'])
+  assert.equal(result.status, 1, result.stdout)
+  assert.ok(jsonResult(result).findings.some((finding) => finding.rule === 'eslint/no-promise-executor-return'))
+  write(directory, 'src/promise.ts', 'export const value = new Promise((resolve) => { resolve(42) })\n')
+  const valid = run(directory, ['lint', 'src/promise.ts', '--format', 'json'])
+  assert.equal(valid.status, 0, valid.stdout)
+})
+
 test('GitHub annotations are automatic, escaped, and explicitly overridable', (t) => {
   const directory = createProject(t)
   write(directory, 'src/comma,name.ts', 'debugger\n')

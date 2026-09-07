@@ -108,7 +108,9 @@ export function parseOxfmt(result: RunResult, cwd: string, write: boolean): Comm
     tool: 'oxfmt'
   }))
 
-  if (result.exitCode !== 0 && findings.length === 0) return executionFailure('oxfmt', cwd, result)
+  if (result.error || result.exitCode > 1 || (result.exitCode !== 0 && findings.length === 0)) {
+    return mergeResults([{ exitCode: findings.length > 0 ? 1 : 0, findings }, executionFailure('oxfmt', cwd, result)])
+  }
   return { exitCode: findings.length > 0 ? 1 : 0, findings }
 }
 

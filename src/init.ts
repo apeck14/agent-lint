@@ -149,7 +149,6 @@ function setManagedFile(
     }
     notes.push(`rename managed ${alternateName} to ${name}`)
     if (dryRun) {
-      if (current !== content) notes.push(`update ${name}`)
       return
     }
     renameSync(alternatePath, path)
@@ -164,7 +163,8 @@ function setManagedFile(
       return
     }
     if (current === content) return
-    notes.push(`update ${name}`)
+    notes.push(`preserved customized ${name}; update factory options manually if detection changed`)
+    return
   } else {
     notes.push(`create ${name}`)
   }

@@ -19,24 +19,27 @@ export async function changedFiles(cwd: string, since?: string): Promise<string[
 
   let branchFiles: string[] = []
   if (since) {
-    const mergeBase = await runProcess('git', ['merge-base', since, 'HEAD'], cwd)
+    const mergeBase = await runProcess('git', ['merge-base', '--', since, 'HEAD'], cwd)
     if (mergeBase.exitCode !== 0 || !mergeBase.stdout.trim()) {
       throw new Error(mergeBase.stderr.trim() || `Could not find a merge base for ${since}`)
     }
     branchFiles = await gitNames(cwd, [
       'diff',
+      '--relative',
       '--name-only',
       '--diff-filter=ACMR',
       '-z',
       mergeBase.stdout.trim(),
-      'HEAD'
+      'HEAD',
+      '--',
+      '.'
     ])
   }
 
   const [unstagedFiles, stagedFiles, untrackedFiles] = await Promise.all([
-    gitNames(cwd, ['diff', '--name-only', '--diff-filter=ACMR', '-z']),
-    gitNames(cwd, ['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z']),
-    gitNames(cwd, ['ls-files', '--others', '--exclude-standard', '-z'])
+    gitNames(cwd, ['diff', '--relative', '--name-only', '--diff-filter=ACMR', '-z', '--', '.']),
+    gitNames(cwd, ['diff', '--relative', '--cached', '--name-only', '--diff-filter=ACMR', '-z', '--', '.']),
+    gitNames(cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.'])
   ])
 
   return [...new Set([...branchFiles, ...unstagedFiles, ...stagedFiles, ...untrackedFiles])]

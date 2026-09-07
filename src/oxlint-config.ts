@@ -19,6 +19,7 @@ const BASE_RULES: DummyRuleMap = {
   'no-eval': 'error',
   'no-implied-eval': 'error',
   'no-new-func': 'error',
+  'no-promise-executor-return': 'error',
   'no-var': 'error',
   'no-unused-vars': [
     'error',

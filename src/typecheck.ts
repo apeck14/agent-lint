@@ -37,7 +37,23 @@ function parseOutput(result: RunResult, cwd: string): CommandResult {
     }
   })
 
-  return { exitCode: findings.length > 0 ? 1 : 2, findings }
+  if (result.error || findings.length === 0) {
+    return {
+      exitCode: 2,
+      findings: [
+        {
+          column: 1,
+          file: join(cwd, 'package.json'),
+          line: 1,
+          message: result.error?.message ?? `Typecheck exited with code ${result.exitCode} without diagnostics`,
+          rule: 'typescript/execution',
+          severity: 'error',
+          tool: 'typescript'
+        }
+      ]
+    }
+  }
+  return { exitCode: 1, findings }
 }
 
 function resolveTypeScript(cwd: string): string | undefined {

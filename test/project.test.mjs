@@ -1,9 +1,31 @@
 import assert from 'node:assert/strict'
-import { existsSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, symlinkSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import test from 'node:test'
 
+import { PACKAGE_VERSION } from '../dist/package-metadata.js'
+import { runProcess } from '../dist/process.js'
 import { parseKnip } from '../dist/tool-results.js'
 import { createProject, git, jsonResult, root, run, snapshot, temporaryDirectory, write } from './helpers.mjs'
+
+test(
+  'Windows runs native Bun executables without requiring a cmd shim',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const directory = temporaryDirectory(t)
+    copyFileSync(process.execPath, join(directory, 'bun.exe'))
+    const previousPath = process.env.PATH
+    process.env.PATH = `${directory}${delimiter}${previousPath ?? ''}`
+    try {
+      const result = await runProcess('bun', ['--version'], directory)
+      assert.equal(result.exitCode, 0, result.error?.message || result.stderr)
+      assert.equal(result.stdout.trim(), process.version)
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH
+      else process.env.PATH = previousPath
+    }
+  }
+)
 
 test('changed mode includes staged and untracked files', (t) => {
   const directory = createProject(t)
@@ -72,6 +94,57 @@ test('since mode unions branch commits with working-tree changes', (t) => {
     .map((finding) => finding.file)
   assert.equal(result.status, 1)
   assert.deepEqual(new Set(files), new Set(['src/committed.ts', 'src/current.ts']))
+})
+
+test('Git selection from a nested package includes every change and excludes siblings', (t) => {
+  const directory = createProject(t)
+  const nested = join(directory, 'packages', 'app')
+  for (const name of ['committed', 'staged', 'unstaged']) {
+    write(directory, `packages/app/${name}.ts`, `export const ${name} = true\n`)
+  }
+  write(directory, 'packages/other/index.ts', 'export const ready = true\n')
+  git(directory, ['init', '-b', 'main'])
+  git(directory, ['config', 'core.autocrlf', 'false'])
+  git(directory, ['config', 'user.name', 'Test'])
+  git(directory, ['config', 'user.email', 'test@example.invalid'])
+  git(directory, ['add', '.'])
+  git(directory, ['commit', '-m', 'base'])
+  git(directory, ['tag', 'base'])
+  write(nested, 'committed.ts', 'debugger\n')
+  git(directory, ['add', '.'])
+  git(directory, ['commit', '-m', 'branch'])
+  write(nested, 'staged.ts', 'debugger\n')
+  git(directory, ['add', '.'])
+  write(nested, 'unstaged.ts', 'debugger\n')
+  write(nested, 'untracked.ts', 'debugger\n')
+  write(directory, 'packages/other/index.ts', 'debugger\n')
+  write(directory, 'packages/other/untracked.ts', 'debugger\n')
+
+  for (const [flags, expected] of [
+    [['--changed'], ['staged.ts', 'unstaged.ts', 'untracked.ts']],
+    [
+      ['--since', 'base'],
+      ['committed.ts', 'staged.ts', 'unstaged.ts', 'untracked.ts']
+    ]
+  ]) {
+    const result = run(nested, ['check', ...flags, '--format', 'json'])
+    assert.equal(result.status, 1, result.stdout)
+    assert.deepEqual(
+      jsonResult(result)
+        .findings.filter((finding) => finding.rule === 'eslint/no-debugger')
+        .map((finding) => finding.file),
+      expected
+    )
+  }
+})
+
+test('a silent failed typecheck produces an actionable execution diagnostic', (t) => {
+  const directory = createProject(t, { packageJson: { scripts: { typecheck: 'node -e "process.exit(2)"' } } })
+  write(directory, 'src/index.ts', 'export const ready = true\n')
+  const result = run(directory, ['check', 'src', '--typecheck', '--format', 'json'])
+  assert.equal(result.status, 2, result.stdout)
+  assert.equal(jsonResult(result).findings[0].rule, 'typescript/execution')
+  assert.match(jsonResult(result).findings[0].message, /without diagnostics/)
 })
 
 test('typecheck uses a non-recursive script and rejects recursion', (t) => {
@@ -171,7 +244,7 @@ test('deadcode does not report native tool configurations as unused files', () =
 test('doctor is read-only for a valid installation', (t) => {
   const directory = createProject(t, {
     packageJson: {
-      devDependencies: { '@apeck14/agent-lint': '1.0.0' },
+      devDependencies: { '@apeck14/agent-lint': PACKAGE_VERSION },
       scripts: {
         check: 'agent-lint check',
         deadcode: 'agent-lint deadcode',
@@ -212,7 +285,7 @@ test('doctor reports an invalid package manifest as an execution failure', (t) =
 test('doctor advises when Git does not preserve formatter line endings', (t) => {
   const directory = createProject(t, {
     packageJson: {
-      devDependencies: { '@apeck14/agent-lint': '1.0.0' },
+      devDependencies: { '@apeck14/agent-lint': PACKAGE_VERSION },
       scripts: {
         check: 'agent-lint check',
         deadcode: 'agent-lint deadcode',

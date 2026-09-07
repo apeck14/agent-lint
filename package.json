@@ -1,6 +1,6 @@
 {
   "name": "@apeck14/agent-lint",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Opinionated, agent-first linting and formatting for JavaScript and TypeScript repositories.",
   "keywords": [
     "agents",
