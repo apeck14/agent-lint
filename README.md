@@ -25,7 +25,7 @@ Across tested large JavaScript and TypeScript repositories using ESLint, migrati
 Requires Node.js 22.18 or newer. npm, pnpm, Yarn, and Bun repositories are supported.
 
 ```sh
-npx --yes @apeck14/agent-lint@1.0.1 init
+npx --yes @apeck14/agent-lint@latest init
 ```
 
 The initializer detects your tooling, installs an exact dev dependency, creates typed configs and package scripts, and
@@ -37,7 +37,7 @@ test runner changes, update those options manually.
 Preview the exact changes without writing:
 
 ```sh
-npx --yes @apeck14/agent-lint@1.0.1 init --dry-run
+npx --yes @apeck14/agent-lint@latest init --dry-run
 ```
 
 ## 🔁 Daily workflow
