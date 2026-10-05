@@ -22,6 +22,19 @@ test('init dry-run reports exact changes without writing', (t) => {
   assert.match(jsonResult(result).notes.join('\n'), /review competing tooling before removal: \.prettierrc/)
 })
 
+test('init preserves project-owned instructions in real and dry runs', (t) => {
+  const directory = temporaryDirectory(t)
+  write(directory, 'package.json', '{"name":"fixture"}\n')
+  const instructions = '<!-- agent-lint:preserve -->\n\nUse the shared workspace policy.\n'
+  write(directory, 'AGENTS.md', instructions)
+  for (const args of [['init', '--dry-run'], ['init'], ['init']]) {
+    const result = run(directory, args, { env: { AGENT_LINT_SKIP_INSTALL: '1' } })
+    assert.equal(result.status, 0, result.stderr || result.stdout)
+    assert.equal(read(directory, 'AGENTS.md'), instructions)
+    assert.match(result.stdout, /preserved project-owned AGENTS.md instructions/)
+  }
+})
+
 test('init is deterministic, detects presets, and is byte-for-byte idempotent', (t) => {
   const directory = temporaryDirectory(t)
   write(
