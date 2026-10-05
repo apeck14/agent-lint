@@ -30,6 +30,7 @@ npx --yes @apeck14/agent-lint@latest init
 
 The initializer detects your tooling, installs an exact dev dependency, creates typed configs and package scripts, and
 adds a short workflow to `AGENTS.md`. It runs without prompts and preserves custom files and scripts, reporting conflicts.
+Add `<!-- agent-lint:preserve -->` to `AGENTS.md` to keep project-owned instructions unchanged during initialization.
 
 Rerunning `init` preserves edits to generated configuration, including factory options. If the detected framework or
 test runner changes, update those options manually.

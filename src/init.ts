@@ -250,6 +250,10 @@ After code edits, run \`${fix}\`; if unrelated changes exist, replace \`--change
 ${AGENT_END}`
   const path = join(cwd, 'AGENTS.md')
   const current = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  if (current.includes('<!-- agent-lint:preserve -->')) {
+    notes.push('preserved project-owned AGENTS.md instructions')
+    return
+  }
   const start = current.indexOf(AGENT_START)
   const end = current.indexOf(AGENT_END)
   let next: string
